@@ -9,7 +9,7 @@ import { cacheGet, cacheSet } from "../cache";
  * FIXED: parser.phone-details.ts
  * 
  * This version properly detects review and camera sample links for ALL phones,
- * including mid-range devices like iQoo Z7 Pro and Poco F7.
+ * including mid-range devices like iQoo Z7 Pro and Poco F7
  */
 
 /**

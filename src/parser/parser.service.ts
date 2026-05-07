@@ -8,7 +8,6 @@
  *  - Exponential-backoff retry on 429 / 5xx / network errors (up to 3 retries)
  *  - Shared keep-alive axios instance (reuses TCP connections)
  *  - Realistic browser headers (Accept, Accept-Language, Referer)
- *  - Import baseUrl from config (not server)
  */
 
 import axios, { AxiosInstance } from 'axios';
