@@ -20,7 +20,6 @@ import https from 'https';
 const MEM_CACHE_MAX = 500; // max entries kept in process memory
 
 // ── In-process LRU map ────────────────────────────────────────────────────────
-// NO TTL — entries live until evicted by capacity.
 const _mem = new Map<string, { data: unknown }>();
 
 function _memEvict(): void {
