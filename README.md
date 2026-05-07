@@ -2,8 +2,6 @@
 
 ![GSMArena + DXOMark Mobile Specs API](https://placehold.co/1280x320/0d1117/58a6ff?text=GSMArena+%2B+DXOMark+Mobile+Specs+API&font=roboto)
 
-# 📡 GSMArena + DXOMark Mobile Specs API
-
 ### The only open-source API that fuses hardware specs, professional camera scores, and categorized camera samples — in a single request.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
