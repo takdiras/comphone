@@ -5,575 +5,687 @@ import { TSpecCategory } from "../types";
 import { getHtml } from "./parser.service";
 import { cacheGet, cacheSet } from "../cache";
 
-/**
- * FIXED: parser.phone-details.ts
- * 
- * This version properly detects review and camera sample links for ALL phones,
- * including mid-range devices like iQoo Z7 Pro and Poco F7
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Normalize a device slug by removing common brand prefixes and suffixes.
- * GSMArena is inconsistent: specs might be "xiaomi_poco_f7" but review is "poco_f7".
+ * Brand prefixes that GSMArena sometimes prepends to device slugs
+ * and review/news URLs. Ordered most-specific → least-specific so the
+ * first match wins and we don't strip "xiaomi_" when the prefix is
+ * "xiaomi_redmi_".
  */
-function normalizeBrand(slug: string): string {
-  let normalized = slug.toLowerCase()
-    .replace(/\.php$/, '')         // Remove .php
-    .replace(/-\d+$/, '')          // Remove trailing ID like -12484
-    .replace(/_5g$/, '');          // Remove _5g suffix
+const BRAND_PREFIXES: readonly string[] = [
+  // Compound sub-brand prefixes (must precede their parent brand)
+  'xiaomi_poco_',
+  'xiaomi_redmi_',
+  'vivo_iqoo_',
+  'samsung_galaxy_',
+  'apple_iphone_',
+  'google_pixel_',
+  'huawei_honor_',
+  'lenovo_motorola_',
+  // Single-brand prefixes
+  'xiaomi_',
+  'vivo_',
+  'samsung_',
+  'apple_',
+  'google_',
+  'huawei_',
+  'lenovo_',
+  'motorola_',
+  'asus_',
+  'sony_',
+  'zte_',
+  'htc_',
+  'meizu_',
+  'infinix_',
+  'tecno_',
+  'itel_',
+  'tcl_',
+  'blackview_',
+  'ulefone_',
+  'doogee_',
+  'oukitel_',
+  'realme_',
+  'oppo_',
+  'oneplus_',
+  'nothing_',
+  'honor_',
+  'nokia_',
+  'poco_',
+  'iqoo_',
+  'redmi_',
+];
 
-  // Remove brand prefixes that GSMArena sometimes includes/excludes
-  // IMPORTANT: More specific prefixes MUST come first (xiaomi_poco_ before poco_ before xiaomi_)
-  const brandPrefixes = [
-    'xiaomi_poco_',
-    'xiaomi_redmi_',
-    'vivo_iqoo_', 
-    'samsung_galaxy_', 
-    'apple_iphone_', 
-    'google_pixel_',
-    'xiaomi_', 
-    'vivo_', 
-    'samsung_',
-    'apple_',
-    'google_',
-    'poco_',  // Standalone poco_ for review links
-    'iqoo_',  // Standalone iqoo_ for review links  
-    'redmi_',
-    'oneplus_', 'realme_', 'oppo_', 'honor_', 'motorola_', 'nokia_'
-  ];
-  
-  for (const prefix of brandPrefixes) {
-    if (normalized.startsWith(prefix)) {
-      normalized = normalized.slice(prefix.length);
-      break; // Only remove the first matching prefix
-    }
-  }
-  
-  return normalized;
+/**
+ * Generic tokens that appear in many device names and therefore cannot
+ * alone establish that two slugs refer to the same model family.
+ */
+const GENERIC_TOKENS = new Set<string>([
+  // Tier/grade suffixes
+  'pro', 'plus', 'ultra', 'mini', 'lite', 'max', 'fe', 'se', 'neo',
+  'edge', 'prime', 'power', 'play', 'note', 'fold', 'flip',
+  // Connectivity/version tags
+  '5g', '4g', 'lte', 'wi-fi', 'wifi',
+  // Single-letter model tags (too ambiguous alone)
+  'x', 'z', 's', 'a', 'c', 'e', 'f', 'y',
+  // Brand names (a slug's own brand token is always generic for sibling-matching)
+  'vivo', 'iqoo', 'xiaomi', 'samsung', 'apple', 'google', 'oppo',
+  'realme', 'oneplus', 'nothing', 'nokia', 'motorola', 'honor',
+  'huawei', 'lenovo', 'asus', 'sony', 'zte', 'htc', 'meizu',
+  'infinix', 'tecno', 'itel', 'tcl', 'poco', 'redmi',
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract an image URL from a Cheerio element by probing a priority-ordered
+ * list of attributes. Falls back to empty string if none found.
+ */
+function extractImgUrl(
+  $: cheerio.CheerioAPI,
+  el: cheerio.Element | cheerio.AnyNode,
+): string {
+  const $el = $(el);
+  return (
+    $el.attr('data-seo-image') ||
+    $el.attr('data-image-url') ||
+    $el.attr('data-image') ||
+    $el.attr('data-src') ||
+    $el.attr('src') ||
+    ''
+  ).trim();
 }
 
 /**
- * Extract meaningful tokens from a slug for fuzzy matching.
- * Example: "vivo_iqoo_z7_pro" → ["iqoo", "z7", "pro"]
+ * Normalise a slug or href for comparison: remove .php, trailing numeric IDs,
+ * _5g / _4g / _lte suffixes, and the longest matching brand prefix.
+ *
+ * When `brand` is provided (e.g. "vivo") we also try stripping it dynamically
+ * so scraper variants like "brand_submodel_foo" and "submodel_foo" both
+ * normalise the same way.
+ */
+function normalizeSlug(slug: string, brand?: string): string {
+  let s = slug
+    .toLowerCase()
+    .replace(/\.php$/, '')
+    .replace(/-\d+$/, '')
+    .replace(/[_-](5g|4g|lte)$/, '');
+
+  // Dynamic brand strip — use the actual brand string extracted from the page
+  if (brand) {
+    const brandSlug = brand.toLowerCase().replace(/\s+/g, '_') + '_';
+    if (s.startsWith(brandSlug)) {
+      s = s.slice(brandSlug.length);
+    }
+  }
+
+  // Hardcoded prefix list as a reliable fallback
+  for (const prefix of BRAND_PREFIXES) {
+    if (s.startsWith(prefix)) {
+      s = s.slice(prefix.length);
+      break;
+    }
+  }
+
+  return s;
+}
+
+/**
+ * Split a slug into meaningful tokens, discarding pure-numeric fragments
+ * and the bare "5g" / "4g" connectivity tags.
  */
 function extractSlugTokens(slug: string): string[] {
   return slug
     .toLowerCase()
     .split(/[_\-\s]+/)
-    .filter(token => 
-      token.length > 1 &&           // Not too short
-      !token.match(/^\d+$/) &&      // Not pure numbers (IDs)
-      !token.match(/^5g$/)          // Not just "5g"
-    );
+    .filter(t => t.length > 1 && !/^\d+$/.test(t) && !/^[45]g$/.test(t));
 }
 
 /**
- * Check if a review/news link is related to this device.
- * Uses multiple strategies to handle GSMArena's inconsistent naming.
+ * Resolve a protocol-relative URL to https://.
+ */
+function ensureHttps(url: string): string {
+  return url.startsWith('//') ? `https:${url}` : url;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review-link helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Assign a relevance score to a candidate href based on its URL shape.
+ * Higher = more desirable.
+ */
+function reviewScore(href: string): number {
+  if (href.includes('-review-')) return 100;
+  if (href.includes('camera_samples') || href.includes('camera-samples')) return 90;
+  if (href.includes('-news-') && href.includes('camera')) return 70;
+  if (href.includes('-news-')) return 30;
+  return 0;
+}
+
+/**
+ * Determine whether a candidate href is related to the device described
+ * by `specSlug`, `brand`, and `model`.
+ *
+ * Four independent strategies are tried in sequence; any hit returns true.
  */
 function isLinkRelatedToDevice(
   href: string,
   specSlug: string,
   brand: string,
-  model: string
+  model: string,
 ): boolean {
-  const hrefLower = href.toLowerCase().replace(/\.php$/, '');
-  const specNormalized = normalizeBrand(specSlug);
-  
-  // Strategy 1: Direct normalized slug match
-  // Example: both normalize to "poco_f7"
-  const linkNormalized = normalizeBrand(hrefLower);
-  if (linkNormalized.includes(specNormalized) || specNormalized.includes(linkNormalized)) {
-    return true;
-  }
-  
-  // Strategy 2: Match by model name parts
-  // Example: model="iQOO Z7 Pro 5G" → check if link contains "iqoo", "z7", "pro"
+  const hrefClean = href.toLowerCase().replace(/\.php$/, '');
+  const specNorm = normalizeSlug(specSlug, brand);
+
+  // Strategy 1 — normalised slug overlap
+  const linkNorm = normalizeSlug(hrefClean, brand);
+  if (linkNorm.includes(specNorm) || specNorm.includes(linkNorm)) return true;
+
+  // Strategy 2 — model token matching (uses word-boundary-aware test)
   if (model) {
     const modelTokens = model
       .toLowerCase()
       .split(/\s+/)
-      .filter(p => p.length > 2 && !p.match(/^5g$/));
-    
-    const matchedModelTokens = modelTokens.filter(token => hrefLower.includes(token));
-    if (matchedModelTokens.length >= Math.min(2, modelTokens.length)) {
-      return true;
-    }
+      .filter(p => p.length > 2 && !/^[45]g$/i.test(p));
+
+    // Word-boundary regex prevents "pro" matching inside "protect", etc.
+    const matched = modelTokens.filter(token => {
+      try {
+        return new RegExp(`\\b${token}\\b`).test(hrefClean);
+      } catch {
+        return hrefClean.includes(token);
+      }
+    });
+    if (matched.length >= Math.min(2, modelTokens.length)) return true;
   }
-  
-  // Strategy 3: Fuzzy token matching
-  // Count how many significant tokens from the spec slug appear in the link
+
+  // Strategy 3 — fuzzy token overlap on spec slug
   const specTokens = extractSlugTokens(specSlug);
-  const hrefTokens = extractSlugTokens(hrefLower);
-  
+  const hrefTokens = extractSlugTokens(hrefClean);
+
   let matchCount = 0;
   for (const token of specTokens) {
     if (hrefTokens.some(ht => ht.includes(token) || token.includes(ht))) {
       matchCount++;
     }
   }
-  
-  // Need at least 2 tokens matching (e.g., "iqoo" + "z7")
-  // OR if spec has only 2 tokens, both must match
-  const requiredMatches = specTokens.length <= 2 ? specTokens.length : 2;
-  if (matchCount >= requiredMatches) {
-    return true;
-  }
-  
-  // Strategy 4: Check if link contains the exact spec slug (with or without brand)
+  const required = specTokens.length <= 2 ? specTokens.length : 2;
+  if (matchCount >= required) return true;
+
+  // Strategy 4 — raw slug fragment present in href (strip leading brand prefix)
   const specSlugClean = specSlug.toLowerCase().replace(/\.php$/, '').replace(/-\d+$/, '');
-  if (hrefLower.includes(specSlugClean.replace(/^[a-z]+_/, ''))) {
-    return true;
-  }
-  
+  const strippedSpec = specSlugClean.replace(/^[a-z]+_/, '');
+  if (strippedSpec && hrefClean.includes(strippedSpec)) return true;
+
   return false;
 }
 
-export async function getPhoneDetails(slug: string): Promise<IPhoneDetails> {
-    const ck = `gsm:phone-details:v1:${slug}`;
-    const cached = await cacheGet<IPhoneDetails>(ck);
-    if (cached) {
-        console.log(`[getPhoneDetails] cache HIT ${ck}`);
-        return cached;
-    }
+/**
+ * Find the best review/camera-samples URL from the already-loaded Cheerio
+ * document. Returns `undefined` when no suitable link is found.
+ */
+function findBestReviewLink(
+  $: cheerio.CheerioAPI,
+  slug: string,
+  brand: string,
+  model: string,
+): string | undefined {
+  interface LinkCandidate { href: string; score: number; isRelated: boolean; }
 
-    const html = await getHtml(`${baseUrl}/${slug}.php`);
-    const $ = cheerio.load(html);
+  // ── Phase 1: score every .php link on the page ───────────────────────────
+  const candidates: LinkCandidate[] = [];
 
-    const brand = $('h1.specs-phone-name-title a').text().trim();
-    const model = $('h1.specs-phone-name-title').contents().filter(function () {
-        return this.type === 'text';
-      }).text().trim();
-      
-    // Primary device image from the specs page.
-    // GSMArena serves this as bigpic (~300px) — we keep whatever URL the page gives us
-    // and let the pictures-page scraper below upgrade it to full-res.
-    const imageUrl = $('.specs-photo-main a img').attr('src')
-      || $('.specs-photo-main img').attr('src')
-      || $('.specs-photo img').attr('src');
+  $('a[href]').each((_, el) => {
+    const rawHref = ($(el).attr('href') || '').toLowerCase();
+    if (!rawHref.endsWith('.php')) return;
 
-    // ── Device colour images ──────────────────────────────────────────────────
-    const device_images: IDeviceImage[] = [];
+    const score = reviewScore(rawHref);
+    if (score === 0) return;
 
-    // Primary image (already captured above)
-    if (imageUrl) {
-      const primaryColor = $('.specs-photo-main').next('.specs-photo-colors, .color-list')
-        .find('li.selected, li:first-child').attr('title') || 'Default';
-      device_images.push({ color: primaryColor, url: imageUrl });
-    }
-
-    // Colour-variant thumbnails rendered as <li data-color="…"> or similar
-    $('li[data-image-url]').each((_, el) => {
-      const url = $(el).attr('data-image-url') || '';
-      const color = $(el).attr('title') || $(el).attr('data-color') || $(el).text().trim() || 'Unknown';
-      if (url && !device_images.find(i => i.url === url)) {
-        device_images.push({ color, url });
-      }
+    const fullUrl = rawHref.startsWith('http') ? rawHref : `${baseUrl}/${rawHref}`;
+    candidates.push({
+      href: fullUrl,
+      score,
+      isRelated: isLinkRelatedToDevice(rawHref, slug, brand, model),
     });
+  });
 
-    // Alternative pattern: img inside .specs-photo-colors
-    $('.specs-photo-colors li, .color-list li').each((_, el) => {
-      const img = $(el).find('img');
-      const url = img.attr('src') || img.attr('data-src') || '';
-      const color = $(el).attr('title') || img.attr('alt') || $(el).text().trim() || 'Unknown';
-      if (url && !device_images.find(i => i.url === url)) {
-        device_images.push({ color, url });
-      }
-    });
+  candidates.sort((a, b) =>
+    a.isRelated !== b.isRelated ? (a.isRelated ? -1 : 1) : b.score - a.score,
+  );
 
-    // ── Review / camera-samples link (FIXED VERSION) ─────────────────────────
-    // GSMArena uses several URL patterns for review/camera content:
-    //   Standard review  : {device}-review-{id}.php
-    //   Camera samples   : {device}_camera_samples_specs-news-{id}.php
-    //   News article     : {device}-news-{id}.php  (some phones only have this)
-    // We collect ALL candidates and rank them: review > camera_samples > news
-    
-    let review_url: string | undefined;
-    
-    // Score a href: higher = better
-    function reviewScore(href: string): number {
-      if (href.includes('-review-')) return 100;
-      if (href.includes('camera_samples') || href.includes('camera-samples')) return 90;
-      if (href.includes('-news-') && href.includes('camera')) return 70;
-      if (href.includes('-news-')) return 30;
-      return 0;
-    }
+  if (candidates.length > 0 && candidates[0].isRelated) return candidates[0].href;
 
-    // Collect all potential review/news/camera-samples links
-    interface LinkCandidate {
-      href: string;
-      score: number;
-      isRelated: boolean;
-    }
-    
-    const candidates: LinkCandidate[] = [];
+  // Accept an unrelated high-score link only for review / camera content
+  if (candidates.length > 0 && candidates[0].score >= 70) return candidates[0].href;
 
-    $('a').each((_, el) => {
-      const href = ($(el).attr('href') || '').toLowerCase();
-      if (!href.endsWith('.php')) return;
-      
-      const score = reviewScore(href);
-      if (score === 0) return;
-      
-      // Check if this link is related to our device
-      const isRelated = isLinkRelatedToDevice(href, slug, brand, model);
-      
-      const fullUrl = href.startsWith('http') ? href : `${baseUrl}/${href}`;
-      candidates.push({ href: fullUrl, score, isRelated });
-    });
-    
+  // ── Phase 2: body-text mention fallback ──────────────────────────────────
+  const pageText = $('body').text().toLowerCase();
+  const probeTexts = [
+    `${brand.toLowerCase()} ${model.toLowerCase()} review`,
+    `${model.toLowerCase()} review`,
+    `${brand.toLowerCase()} ${model.toLowerCase()} camera`,
+    `${model.toLowerCase()} camera samples`,
+  ];
 
-    // Sort by: related first, then by score
-    candidates.sort((a, b) => {
-      if (a.isRelated !== b.isRelated) return a.isRelated ? -1 : 1;
-      return b.score - a.score;
-    });
+  for (const probe of probeTexts) {
+    if (!pageText.includes(probe)) continue;
 
-    // Take the best match
-    if (candidates.length > 0 && candidates[0].isRelated) {
-      review_url = candidates[0].href;
-    } else if (candidates.length > 0) {
-      // Fallback: if no "related" match, take highest scoring link anyway
-      // (some phones might have unusual naming)
-      const bestUnrelated = candidates[0];
-      if (bestUnrelated.score >= 70) { // Only if it's review or camera_samples
-        review_url = bestUnrelated.href;
-        } else {
-      }
-    } else {
-    }
-
-    // Additional fallback: search in page text for links
-    if (!review_url) {
-      const pageText = $('body').text().toLowerCase();
-      const possibleReviewTexts = [
-        `${brand.toLowerCase()} ${model.toLowerCase()} review`,
-        `${model.toLowerCase()} review`,
-        `${brand.toLowerCase()} ${model.toLowerCase()} camera`,
-        `${model.toLowerCase()} camera samples`
-      ];
-      
-      for (const searchText of possibleReviewTexts) {
-        if (pageText.includes(searchText)) {
-          // Page mentions a review/camera - try one more aggressive search
-          $('a').each((_, el) => {
-            const href = ($(el).attr('href') || '').toLowerCase();
-            const text = $(el).text().toLowerCase();
-            if ((href.includes('review') || href.includes('camera') || href.includes('news')) &&
-                (text.includes('review') || text.includes('camera'))) {
-              const fullUrl = href.startsWith('http') ? href : `${baseUrl}/${href}`;
-              if (!review_url) review_url = fullUrl;
-            }
-          });
-          break;
-        }
-      }
-    }
-    
-    // FINAL fallback: Search news section specifically (on-page links)
-    if (!review_url) {
-      $('a[href*="news"]').each((_, el) => {
-        const href = $(el).attr('href') || '';
-        const text = $(el).text().toLowerCase();
-        if (href.includes('camera') || text.includes('camera')) {
-          const fullUrl = href.startsWith('http') ? href : `${baseUrl}/${href}`;
-          if (isLinkRelatedToDevice(fullUrl, slug, brand, model)) {
-            review_url = fullUrl;
-            return false; // break
-          }
-        }
-      });
-    }
-
-
-
-    // ── HD pictures page link ────────────────────────────────────────────────
-    // GSMArena specs pages link to a pictures gallery: {device}-pictures-{id}.php
-    // These contain full-resolution press photos (much sharper than bigpic ~300px)
-    let picturesPageUrl: string | undefined;
-    $(`a[href*="-pictures-"]`).each((_, el) => {
-      const href = ($(el).attr('href') || '');
-      if (href.includes('-pictures-') && href.endsWith('.php')) {
-        picturesPageUrl = href.startsWith('http') ? href : `${baseUrl}/${href}`;
-        return false; // take first match
-      }
-    });
-
-    // ── Scrape pictures page: ALL official images + color variants ────────────
-    //
-    // GSMArena pictures pages have:
-    //   1. "Official images" — fdn2.gsmarena.com/vv/pics/<brand>/<model>-N.jpg
-    //      Full-resolution press renders (front, back, side, angle shots).
-    //      We collect ALL of them, not just the first.
-    //   2. 3D model viewer — color variant <li> chips with data-seo-image="URL"
-    //      Each chip has the color name and a representative full-res image URL.
-    //      We collect these for the color picker UI.
-    //   3. Review sidebar thumbnails (imgroot) — small cropped stills, skipped.
-    //
-    let hdImageUrl: string | undefined;
-    let officialImages: string[] = [];
-    let colorVariants: IColorVariant[] = [];
-
-    if (picturesPageUrl) {
-      try {
-        const picHtml = await getHtml(picturesPageUrl);
-        const $pic = cheerio.load(picHtml);
-
-        // ── DEBUG: dump script content to understand GSMArena's page structure ──
-        const scriptBlob = $pic('script').map((_, el) => $pic(el).html() || '').get().join('\n');
-        // Log any script lines that look image-related so we can see the real var names
-        const imageScriptLines = scriptBlob.split('\n').filter(l =>
-          /imgroot|bigpic|pics\s*=|photos\s*=|images\s*=|fdn2|vv\/|\.jpg/i.test(l)
-        ).slice(0, 30);
-        
-        // Log a sample of all <li> elements with data- attrs to find color variant pattern
-        const liAttrs: string[] = [];
-        $pic('li').each((_, el) => {
-          const attrs = Object.keys((el as any).attribs || {})
-            .filter(a => a.startsWith('data-') || a === 'class' || a === 'title')
-            .map(a => `${a}="${$pic(el).attr(a)}"`)
-            .join(' ');
-          if (attrs) liAttrs.push(`<li ${attrs}>`);
-        });
-
-        // ── Pass 0A: extract full gallery from inline JS — multiple patterns ──
-        // GSMArena uses various variable names across different page versions.
-        // We try all known patterns.
-
-        // Pattern 1: var imgroot + var pics (older pages)
-        const imgrootMatch = scriptBlob.match(/var\s+imgroot\s*=\s*["']([^"']+)["']/);
-        const rawImgroot = imgrootMatch?.[1] || '';
-        const imgroot = rawImgroot.startsWith('//')
-          ? `https:${rawImgroot}`
-          : rawImgroot;
-
-        // Try several known array variable names
-        const arrayVarPatterns = [
-          /var\s+pics\s*=\s*\[([^\]]+)\]/,
-          /var\s+photos\s*=\s*\[([^\]]+)\]/,
-          /var\s+images\s*=\s*\[([^\]]+)\]/,
-          /"pics"\s*:\s*\[([^\]]+)\]/,
-          /"photos"\s*:\s*\[([^\]]+)\]/,
-        ];
-
-        for (const pattern of arrayVarPatterns) {
-          const arrayMatch = scriptBlob.match(pattern);
-          if (!arrayMatch) continue;
-          const inner = arrayMatch[1];
-
-          // Sub-case A: relative filenames + imgroot base
-          if (imgroot) {
-            const filenames = Array.from(inner.matchAll(/"([^"]+\.jpe?g)"/gi)).map(m => m[1]);
-            for (const filename of filenames) {
-              if (!filename.startsWith('http')) {
-                const fullUrl = `${imgroot}${filename}`;
-                if (!officialImages.includes(fullUrl)) officialImages.push(fullUrl);
-              }
-            }
-          }
-          // Sub-case B: full URLs in the array
-          const fullUrls = Array.from(inner.matchAll(/"((?:https?:)?\/\/[^"]+\.jpe?g)"/gi)).map(m => {
-            const u = m[1];
-            return u.startsWith('//') ? `https:${u}` : u;
-          });
-          for (const url of fullUrls) {
-            if (!officialImages.includes(url)) officialImages.push(url);
-          }
-          if (officialImages.length > 0) break; // stop if we found images
-        }
-
-        // ── Pass 0B: scan ALL <a href> for full-res image links ───────────────
-        // GSMArena wraps gallery thumbnails in <a href="full-res-url">.
-        // This catches images the JS approach misses.
-        $pic('a[href]').each((_, el) => {
-          const href = ($pic(el).attr('href') || '').trim();
-          const fullHref = href.startsWith('//') ? `https:${href}` : href;
-          if (
-            fullHref.match(/\.jpe?g$/i) &&
-            (fullHref.includes('gsmarena.com') || fullHref.includes('fdn2.') || fullHref.includes('fdn.')) &&
-            !fullHref.includes('/reviews/') &&
-            !fullHref.includes('/lifestyle/') &&
-            !officialImages.includes(fullHref)
-          ) {
-            officialImages.push(fullHref);
-          }
-        });
-
-        // ── Pass 1: scan <img> tags for /vv/pics/ images not already captured ─
-        $pic('img').each((_, el) => {
-          const src = $pic(el).attr('src') || $pic(el).attr('data-src') || '';
-          const fullSrc = src.startsWith('//') ? `https:${src}` : src;
-          if (fullSrc.includes('/vv/pics/') && fullSrc.includes('gsmarena.com') && fullSrc.match(/\.jpe?g$/i)) {
-            if (!officialImages.includes(fullSrc)) officialImages.push(fullSrc);
-          }
-        });
-        // First official image is the hero
-        if (officialImages.length > 0) hdImageUrl = officialImages[0];
-
-        // ── Pass 2: color variants from the 3D model section ───────────────────
-        // Try all known attribute/selector patterns GSMArena has used
-        const colorSelectors = [
-          'ul.color-list li',
-          '#model-3d li',
-          '.model-3d li',
-          '[class*="color-list"] li',
-          '[class*="model-3d"] li',
-          'ul[class*="colors"] li',
-          '.pictures-colors li',
-          '.color-buttons li',
-        ];
-        $pic(colorSelectors.join(', ')).each((idx, el) => {
-          const $li = $pic(el);
-          const imgUrl = (
-            $li.attr('data-seo-image') ||
-            $li.attr('data-image') ||
-            $li.attr('data-image-url') ||
-            $li.attr('data-src') ||
-            $li.find('img').attr('src') ||
-            $li.find('img').attr('data-src') ||
-            ''
-          ).trim();
-          const rawUrl = imgUrl.startsWith('//') ? `https:${imgUrl}` : imgUrl;
-          const colorName = (
-            $li.attr('title') ||
-            $li.attr('data-color') ||
-            $li.find('span').text() ||
-            $li.text()
-          ).trim();
-          if (colorName && rawUrl && (rawUrl.startsWith('http') || rawUrl.startsWith('//'))) {
-            colorVariants.push({ colorName, imageUrl: rawUrl, isDefault: idx === 0 });
-          }
-        });
-
-        // ── Fallback: infer color names from inline JS color/colors array ──────
-        // scriptBlob already built above — reuse it here.
-        if (colorVariants.length === 0 && officialImages.length > 0) {
-          const colorsMatch = scriptBlob.match(/(?:var\s+colors?|"colors?")\s*[=:]\s*\[([^\]]+)\]/);
-          if (colorsMatch) {
-            const names = Array.from(colorsMatch[1].matchAll(/"([^"]+)"/g)).map(m => m[1]);
-            names.forEach((name, idx) => {
-              const imgUrl = officialImages[idx] || officialImages[0];
-              if (name && imgUrl) colorVariants.push({ colorName: name, imageUrl: imgUrl, isDefault: idx === 0 });
-            });
-          }
-        }
-
-        // ── Pass 3: imgroot fallback if no /vv/pics/ found ─────────────────
-        if (!hdImageUrl) {
-          const isCleanImgroot = (src: string) =>
-            src.includes('/imgroot/') && src.includes('gsmarena.com') &&
-            !src.includes('/reviews/') && !src.includes('/camera') &&
-            !src.includes('/lifestyle/') && !src.includes('/inline/');
-
-          let foundThumb: string | undefined;
-          $pic('img').each((_, el) => {
-            const src = $pic(el).attr('src') || $pic(el).attr('data-src') || '';
-            if (isCleanImgroot(src) && (src.includes('/photos/') || src.includes('/design/'))) {
-              foundThumb = src; return false;
-            }
-          });
-          if (!foundThumb) {
-            $pic('img').each((_, el) => {
-              const src = $pic(el).attr('src') || $pic(el).attr('data-src') || '';
-              if (isCleanImgroot(src)) { foundThumb = src; return false; }
-            });
-          }
-          if (foundThumb) {
-            hdImageUrl = foundThumb.replace(/\/-[^/]+\/(?=[^/]+\.jpe?g$)/i, '/-/-/');
-          }
-        }
-      } catch {
-        // pictures page failed — hdImageUrl stays undefined, falls back to bigpic
-      }
-    }
-
-    const release_date = $('span[data-spec="released-hl"]').text().trim();
-    const dimensions = $('span[data-spec="body-hl"]').text().trim();
-    const os = $('span[data-spec="os-hl"]').text().trim();
-    const storage = $('span[data-spec="storage-hl"]').text().trim();
-    
-    const specifications: Record<string, TSpecCategory> = {};
-
-    $('#specs-list table').each((_, table) => {
-      const categoryName = $(table).find('th').text().trim();
-      if (!categoryName) return;
-
-      const categorySpecs: TSpecCategory = {};
-      const additionalFeatures: string[] = [];
-
-      $(table).find('tr').each((_, row) => {
-        const title = $(row).find('td.ttl').text().trim();
-        const value = $(row).find('td.nfo').html()?.replace(/<br\s*\/?>/gi, '\n').trim() || '';
-
-        if (title && title !== '\u00a0') {
-          categorySpecs[title] = value;
-        } else if (value) {
-          additionalFeatures.push(value);
-        }
-      });
-      
-      if (additionalFeatures.length > 0) {
-        categorySpecs['Features'] = additionalFeatures.join('\n');
-      }
-
-      if (Object.keys(categorySpecs).length > 0) {
-        specifications[categoryName] = categorySpecs;
-      }
-    });
-    
-    // ── Sibling device slugs ──────────────────────────────────────────────────
-    // Collect links to OTHER device spec pages that are variants of this device.
-    // Strip brand prefix and generic words — only match on SPECIFIC model tokens.
-    // e.g. "vivo_iqoo_z7_pro" → specific tokens: ["iqoo", "z7"]
-    // "vivo_x300_pro_5g" shares only "pro" (generic) → NOT a sibling
-    // "vivo_iqoo_z7_pro_5g" shares "iqoo" + "z7" → IS a sibling
-    const GENERIC_TOKENS = new Set(['pro', 'plus', 'ultra', 'mini', 'lite', 'max', '5g', '4g', 'fe', 'se', 'neo', 'edge', 'vivo', 'iqoo', 'xiaomi', 'samsung', 'apple', 'google', 'oppo', 'realme', 'oneplus', 'nothing', 'nokia', 'motorola', 'honor', 'huawei']);
-    // Brand token = first part of slug
-    const brandToken = slug.split('_')[0];
-    const slugBase = slug.toLowerCase().replace(/-\d+$/, '');
-    // Specific tokens: exclude brand and generic words, keep model-specific identifiers
-    const specificTokens = slugBase.split('_').filter((t: string) => 
-      t.length > 1 && !GENERIC_TOKENS.has(t) && t !== brandToken
-    );
-    // If no specific tokens found (e.g. slug is just "vivo_pro"), fall back to all non-brand tokens
-    const matchTokens = specificTokens.length > 0 
-      ? specificTokens 
-      : slugBase.split('_').filter((t: string) => t.length > 1 && t !== brandToken);
-
-    const siblingDeviceSlugs: string[] = [];
+    let found: string | undefined;
     $('a[href]').each((_, el) => {
-      const href = ($(el).attr('href') || '').replace(/\.php$/, '').replace(/^\//, '');
-      if (!/^[a-z0-9_]+-\d+$/.test(href)) return;
-      if (href === slug) return;
-      // ALL specific tokens must appear in the sibling slug
-      const hrefBase = href.replace(/-\d+$/, '').toLowerCase();
-      const allMatch = matchTokens.every((t: string) => hrefBase.includes(t));
-      if (allMatch && !siblingDeviceSlugs.includes(href)) {
-        siblingDeviceSlugs.push(href);
+      if (found) return;
+      const href = ($(el).attr('href') || '').toLowerCase();
+      const text = $(el).text().toLowerCase();
+      if (
+        (href.includes('review') || href.includes('camera') || href.includes('news')) &&
+        (text.includes('review') || text.includes('camera'))
+      ) {
+        found = href.startsWith('http') ? href : `${baseUrl}/${href}`;
+      }
+    });
+    if (found) return found;
+  }
+
+  // ── Phase 3: news links that mention camera ──────────────────────────────
+  let finalFallback: string | undefined;
+  $('a[href*="news"]').each((_, el) => {
+    if (finalFallback) return;
+    const href = $(el).attr('href') || '';
+    const text = $(el).text().toLowerCase();
+    if (href.includes('camera') || text.includes('camera')) {
+      const full = href.startsWith('http') ? href : `${baseUrl}/${href}`;
+      if (isLinkRelatedToDevice(href, slug, brand, model)) finalFallback = full;
+    }
+  });
+
+  return finalFallback;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pictures-page scraper
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PicturesPageResult {
+  hdImageUrl: string | undefined;
+  officialImages: string[];
+  colorVariants: IColorVariant[];
+}
+
+/**
+ * Fetch and parse a GSMArena pictures page, collecting:
+ *   - All official full-resolution press renders (/vv/pics/ images)
+ *   - Colour-variant chips with per-colour image URLs
+ *
+ * Silently warns (never throws) so the caller always receives a valid result.
+ */
+async function scrapePicturesPage(url: string): Promise<PicturesPageResult> {
+  const empty: PicturesPageResult = { hdImageUrl: undefined, officialImages: [], colorVariants: [] };
+
+  let picHtml: string;
+  try {
+    picHtml = await getHtml(url);
+  } catch (err) {
+    console.warn(`[scrapePicturesPage] failed to fetch ${url}:`, err);
+    return empty;
+  }
+
+  let $pic: cheerio.CheerioAPI;
+  try {
+    $pic = cheerio.load(picHtml);
+  } catch (err) {
+    console.warn(`[scrapePicturesPage] failed to parse HTML from ${url}:`, err);
+    return empty;
+  }
+
+  const officialImages: string[] = [];
+  const colorVariants: IColorVariant[] = [];
+
+  // ── Pass 0A: extract gallery from inline JS ─────────────────────────────
+  const scriptBlob = $pic('script')
+    .map((_, el) => $pic(el).html() ?? '')
+    .get()
+    .join('\n');
+
+  // imgroot base URL (older page format)
+  const imgrootMatch = scriptBlob.match(/var\s+imgroot\s*=\s*["']([^"']+)["']/);
+  const imgroot = imgrootMatch ? ensureHttps(imgrootMatch[1]) : '';
+
+  // Cleaned array-variable patterns — handle both JS `var x = [...]` and
+  // JSON `"key": [...]` forms, and tolerate multi-line arrays.
+  const galleryArrayPatterns: RegExp[] = [
+    /var\s+pics\s*=\s*\[([^\]]*)\]/s,
+    /var\s+photos\s*=\s*\[([^\]]*)\]/s,
+    /var\s+images\s*=\s*\[([^\]]*)\]/s,
+    /"pics"\s*:\s*\[([^\]]*)\]/s,
+    /"photos"\s*:\s*\[([^\]]*)\]/s,
+    /"images"\s*:\s*\[([^\]]*)\]/s,
+  ];
+
+  for (const pattern of galleryArrayPatterns) {
+    const m = scriptBlob.match(pattern);
+    if (!m) continue;
+    const inner = m[1];
+
+    // Sub-case A: relative filenames + imgroot base
+    if (imgroot) {
+      const filenames = Array.from(inner.matchAll(/"([^"]+\.jpe?g)"/gi)).map(x => x[1]);
+      for (const filename of filenames) {
+        if (!filename.startsWith('http')) {
+          const full = `${imgroot}${filename}`;
+          if (!officialImages.includes(full)) officialImages.push(full);
+        }
+      }
+    }
+
+    // Sub-case B: full / protocol-relative URLs in the array
+    const fullUrls = Array.from(inner.matchAll(/"((?:https?:)?\/\/[^"]+\.jpe?g)"/gi))
+      .map(x => ensureHttps(x[1]));
+    for (const u of fullUrls) {
+      if (!officialImages.includes(u)) officialImages.push(u);
+    }
+
+    if (officialImages.length > 0) break;
+  }
+
+  // ── Pass 0B: <a href> full-res image links ──────────────────────────────
+  $pic('a[href]').each((_, el) => {
+    const href = ensureHttps(($pic(el).attr('href') ?? '').trim());
+    if (
+      /\.jpe?g$/i.test(href) &&
+      (href.includes('gsmarena.com') || href.includes('fdn2.') || href.includes('fdn.')) &&
+      !href.includes('/reviews/') &&
+      !href.includes('/lifestyle/') &&
+      !officialImages.includes(href)
+    ) {
+      officialImages.push(href);
+    }
+  });
+
+  // ── Pass 1: <img> tags with /vv/pics/ paths ─────────────────────────────
+  $pic('img').each((_, el) => {
+    const raw = extractImgUrl($pic, el);
+    const src = ensureHttps(raw);
+    if (
+      src.includes('/vv/pics/') &&
+      src.includes('gsmarena.com') &&
+      /\.jpe?g$/i.test(src) &&
+      !officialImages.includes(src)
+    ) {
+      officialImages.push(src);
+    }
+  });
+
+  const hdImageUrl = officialImages[0];
+
+  // ── Pass 2: color variant chips ─────────────────────────────────────────
+  const colorSelectors = [
+    'ul.color-list li',
+    '#model-3d li',
+    '.model-3d li',
+    '[class*="color-list"] li',
+    '[class*="model-3d"] li',
+    'ul[class*="colors"] li',
+    '.pictures-colors li',
+    '.color-buttons li',
+  ].join(', ');
+
+  $pic(colorSelectors).each((idx, el) => {
+    const $li = $pic(el);
+
+    // Use unified helper first; fall back to child <img>
+    const raw =
+      extractImgUrl($pic, el) ||
+      extractImgUrl($pic, $li.find('img').get(0) as cheerio.Element);
+    const imgUrl = ensureHttps(raw);
+
+    const colorName = (
+      $li.attr('title') ||
+      $li.attr('data-color') ||
+      $li.find('span').text() ||
+      $li.text()
+    ).trim();
+
+    if (colorName && imgUrl && (imgUrl.startsWith('http') || imgUrl.startsWith('//'))) {
+      colorVariants.push({ colorName, imageUrl: imgUrl, isDefault: idx === 0 });
+    }
+  });
+
+  // ── Fallback: infer color names from inline JS colors array ─────────────
+  if (colorVariants.length === 0 && officialImages.length > 0) {
+    const colorsMatch = scriptBlob.match(/(?:var\s+colors?|"colors?")\s*[=:]\s*\[([^\]]+)\]/);
+    if (colorsMatch) {
+      const names = Array.from(colorsMatch[1].matchAll(/"([^"]+)"/g)).map(m => m[1]);
+      names.forEach((name, idx) => {
+        const imgUrl = officialImages[idx] ?? officialImages[0];
+        if (name && imgUrl) colorVariants.push({ colorName: name, imageUrl: imgUrl, isDefault: idx === 0 });
+      });
+    }
+  }
+
+  // ── Pass 3: imgroot fallback when /vv/pics/ not found ───────────────────
+  let resolvedHd = hdImageUrl;
+  if (!resolvedHd) {
+    const isCleanImgroot = (src: string) =>
+      src.includes('/imgroot/') &&
+      src.includes('gsmarena.com') &&
+      !src.includes('/reviews/') &&
+      !src.includes('/camera') &&
+      !src.includes('/lifestyle/') &&
+      !src.includes('/inline/');
+
+    let foundThumb: string | undefined;
+
+    $pic('img').each((_, el) => {
+      if (foundThumb) return;
+      const src = ensureHttps(extractImgUrl($pic, el));
+      if (isCleanImgroot(src) && (src.includes('/photos/') || src.includes('/design/'))) {
+        foundThumb = src;
       }
     });
 
-    // Build picturesPageData bundle
-    const picturesPageData: IPicturesPageData | undefined = picturesPageUrl ? {
-      officialImages,
-      colorVariants,
-      picturesPageUrl,
-    } : undefined;
+    if (!foundThumb) {
+      $pic('img').each((_, el) => {
+        if (foundThumb) return;
+        const src = ensureHttps(extractImgUrl($pic, el));
+        if (isCleanImgroot(src)) foundThumb = src;
+      });
+    }
 
-    const result: IPhoneDetails = { 
-      brand, 
-      model, 
-      imageUrl: hdImageUrl || imageUrl,  // HD press photo if available, else bigpic
-      device_images,
-      review_url,
-      siblingDeviceSlugs,
-      release_date, 
-      dimensions, 
-      os, 
-      storage, 
-      specifications,
-      picturesPageData,
-    } as any;
-    cacheSet(ck, result);
-    return result;
+    if (foundThumb) {
+      resolvedHd = foundThumb.replace(/\/-[^/]+\/(?=[^/]+\.jpe?g$)/i, '/-/-/');
+    }
   }
+
+  return { hdImageUrl: resolvedHd, officialImages, colorVariants };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main export
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getPhoneDetails(slug: string): Promise<IPhoneDetails> {
+  const ck = `gsm:phone-details:v2:${slug}`;
+  const cached = await cacheGet<IPhoneDetails>(ck);
+  if (cached) {
+    console.log(`[getPhoneDetails] cache HIT ${ck}`);
+    return cached;
+  }
+
+  const html = await getHtml(`${baseUrl}/${slug}.php`);
+  const $ = cheerio.load(html);
+
+  // ── Identity ─────────────────────────────────────────────────────────────
+  const brand = $('h1.specs-phone-name-title a').text().trim();
+  const model = $('h1.specs-phone-name-title')
+    .contents()
+    .filter(function () { return this.type === 'text'; })
+    .text()
+    .trim();
+
+  // ── Primary image (bigpic, ~300 px) ─────────────────────────────────────
+  const imageUrl =
+    $('.specs-photo-main a img').attr('src') ||
+    $('.specs-photo-main img').attr('src') ||
+    $('.specs-photo img').attr('src');
+
+  // ── Colour variant images ────────────────────────────────────────────────
+  const device_images: IDeviceImage[] = [];
+
+  if (imageUrl) {
+    const primaryColor =
+      $('.specs-photo-main')
+        .next('.specs-photo-colors, .color-list')
+        .find('li.selected, li:first-child')
+        .attr('title') || 'Default';
+    device_images.push({ color: primaryColor, url: imageUrl });
+  }
+
+  // Pattern A: <li data-image-url="…">
+  $('li[data-image-url]').each((_, el) => {
+    const url = $(el).attr('data-image-url') || '';
+    const color =
+      $(el).attr('title') ||
+      $(el).attr('data-color') ||
+      $(el).text().trim() ||
+      'Unknown';
+    if (url && !device_images.some(i => i.url === url)) {
+      device_images.push({ color, url });
+    }
+  });
+
+  // Pattern B: <img> inside .specs-photo-colors / .color-list
+  $('.specs-photo-colors li, .color-list li').each((_, el) => {
+    const img = $(el).find('img');
+    // Use unified helper on the img element
+    const url = ensureHttps(extractImgUrl($, img.get(0) as cheerio.Element));
+    const color =
+      $(el).attr('title') ||
+      img.attr('alt') ||
+      $(el).text().trim() ||
+      'Unknown';
+    if (url && !device_images.some(i => i.url === url)) {
+      device_images.push({ color, url });
+    }
+  });
+
+  // ── Review / camera-samples link ─────────────────────────────────────────
+  const review_url = findBestReviewLink($, slug, brand, model);
+
+  // ── Pictures-page URL ────────────────────────────────────────────────────
+  let picturesPageUrl: string | undefined;
+  $('a[href*="-pictures-"]').each((_, el) => {
+    if (picturesPageUrl) return;
+    const href = $(el).attr('href') ?? '';
+    if (href.includes('-pictures-') && href.endsWith('.php')) {
+      picturesPageUrl = href.startsWith('http') ? href : `${baseUrl}/${href}`;
+    }
+  });
+
+  // ── HD images + colour variants from pictures page ───────────────────────
+  let hdImageUrl: string | undefined;
+  let officialImages: string[] = [];
+  let colorVariants: IColorVariant[] = [];
+
+  if (picturesPageUrl) {
+    ({ hdImageUrl, officialImages, colorVariants } = await scrapePicturesPage(picturesPageUrl));
+  }
+
+  // ── Quick-spec highlights ─────────────────────────────────────────────────
+  const release_date = $('span[data-spec="released-hl"]').text().trim();
+  const dimensions = $('span[data-spec="body-hl"]').text().trim();
+  const os = $('span[data-spec="os-hl"]').text().trim();
+  const storage = $('span[data-spec="storage-hl"]').text().trim();
+
+  // ── Full specification table ─────────────────────────────────────────────
+  const specifications: Record<string, TSpecCategory> = {};
+
+  $('#specs-list table').each((_, table) => {
+    const categoryName = $(table).find('th').text().trim();
+    if (!categoryName) return;
+
+    const categorySpecs: TSpecCategory = {};
+    const additionalFeatures: string[] = [];
+
+    $(table).find('tr').each((_, row) => {
+      const title = $(row).find('td.ttl').text().trim();
+      const value =
+        $(row).find('td.nfo').html()?.replace(/<br\s*\/?>/gi, '\n').trim() ?? '';
+
+      if (title && title !== '\u00a0') {
+        categorySpecs[title] = value;
+      } else if (value) {
+        additionalFeatures.push(value);
+      }
+    });
+
+    if (additionalFeatures.length > 0) {
+      categorySpecs['Features'] = additionalFeatures.join('\n');
+    }
+
+    if (Object.keys(categorySpecs).length > 0) {
+      specifications[categoryName] = categorySpecs;
+    }
+  });
+
+  // ── Sibling device slugs ─────────────────────────────────────────────────
+  // Two devices are siblings when ALL specific (non-generic) tokens from the
+  // current slug appear in the candidate slug.
+  // e.g. "vivo_iqoo_z7_pro" specific tokens: ["z7"]  ← "iqoo" is generic
+  //      "vivo_iqoo_z7_pro_5g" → sibling ✓
+  //      "vivo_x300_pro_5g"    → NOT sibling (missing "z7") ✓
+
+  const brandToken = slug.split('_')[0];
+  const slugBase = slug.toLowerCase().replace(/-\d+$/, '');
+
+  const specificTokens = slugBase
+    .split('_')
+    .filter(t => t.length > 1 && !GENERIC_TOKENS.has(t) && t !== brandToken);
+
+  const matchTokens =
+    specificTokens.length > 0
+      ? specificTokens
+      : slugBase.split('_').filter(t => t.length > 1 && t !== brandToken);
+
+  const siblingDeviceSlugs: string[] = [];
+  $('a[href]').each((_, el) => {
+    const href = ($(el).attr('href') ?? '').replace(/\.php$/, '').replace(/^\//, '');
+    if (!/^[a-z0-9_]+-\d+$/.test(href) || href === slug) return;
+
+    const hrefBase = href.replace(/-\d+$/, '').toLowerCase();
+    if (
+      matchTokens.every(t => hrefBase.includes(t)) &&
+      !siblingDeviceSlugs.includes(href)
+    ) {
+      siblingDeviceSlugs.push(href);
+    }
+  });
+
+  // ── Assemble result ───────────────────────────────────────────────────────
+  const picturesPageData: IPicturesPageData | undefined = picturesPageUrl
+    ? { officialImages, colorVariants, picturesPageUrl }
+    : undefined;
+
+  const result: IPhoneDetails = {
+    brand,
+    model,
+    imageUrl: hdImageUrl ?? imageUrl,
+    device_images,
+    review_url,
+    siblingDeviceSlugs,
+    release_date,
+    dimensions,
+    os,
+    storage,
+    specifications,
+    picturesPageData,
+  };
+
+  cacheSet(ck, result);
+  return result;
+}
