@@ -77,11 +77,16 @@ export function normalizeSpecValue(raw: string): string {
  * Priority matters: more specific patterns come first (GHz before Hz, TB before GB).
  */
 export function extractQuantity(normalized: string): number | null {
+  // mAh: collect ALL values and return the max (handles "6000 mAh or 6500 mAh")
+  const mahAll = [...normalized.matchAll(/(\d+(?:\.\d+)?)\s*mah\b/gi)]
+  if (mahAll.length > 0) {
+    return Math.max(...mahAll.map(m => parseFloat(m[1])))
+  }
+
   const patterns: [RegExp, number][] = [
     [/(\d+(?:\.\d+)?)\s*tb\b/i,            1_000_000], // TB → MB
     [/(\d+(?:\.\d+)?)\s*gb\b/i,            1_000],     // GB → MB
     [/(\d+(?:\.\d+)?)\s*mb\b/i,            1],         // MB
-    [/(\d+(?:\.\d+)?)\s*mah\b/i,           1],         // mAh
     [/(\d+(?:\.\d+)?)\s*mp\b/i,            1],         // megapixels
     [/(\d+(?:\.\d+)?)\s*ghz\b/i,           1_000],     // GHz → MHz
     [/(\d+(?:\.\d+)?)\s*mhz\b/i,           1],         // MHz
