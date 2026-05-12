@@ -4,6 +4,7 @@ import { ArrowLeft, Calendar, Ruler, Cpu, HardDrive, ExternalLink, GitCompareArr
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { getPhoneDetails } from '@/parser/parser.phone-details'
+import { getDxoScores, type IDxoScore } from '@/parser/parser.dxomark'
 import ImageGallery from './ImageGallery'
 import { formatSpecValue } from '@/lib/formatSpec'
 
@@ -34,8 +35,16 @@ export default async function PhoneDetailPage({ params }: Props) {
   const { slug } = await params
 
   let data: Awaited<ReturnType<typeof getPhoneDetails>>
+  let dxo: IDxoScore | null = null
   try {
-    data = await getPhoneDetails(slug)
+    const dxoName = slug.replace(/-\d+$/, '').replace(/_/g, ' ')
+    const [detailsResult, dxoResult] = await Promise.allSettled([
+      getPhoneDetails(slug),
+      getDxoScores(dxoName),
+    ])
+    if (detailsResult.status === 'rejected') notFound()
+    data = (detailsResult as PromiseFulfilledResult<Awaited<ReturnType<typeof getPhoneDetails>>>).value
+    if (dxoResult.status === 'fulfilled') dxo = dxoResult.value
   } catch {
     notFound()
   }
@@ -146,6 +155,11 @@ export default async function PhoneDetailPage({ params }: Props) {
           </div>
         </div>
 
+        {/* DXOMark Camera Score */}
+        {dxo && dxo._source !== 'failed' && !dxo.noCameraReview && (
+          <DxoMarkSection dxo={dxo} />
+        )}
+
         {/* Full specifications */}
         {specCategories.length > 0 && (
           <div>
@@ -182,5 +196,104 @@ export default async function PhoneDetailPage({ params }: Props) {
         )}
       </div>
     </main>
+  )
+}
+
+// ── DXOMark Camera Score section ──────────────────────────────────────────────
+
+function DxoMarkSection({ dxo }: { dxo: IDxoScore }) {
+  const subScores: { label: string; value: number | null }[] = [
+    { label: 'Photo',  value: dxo.scores.photo },
+    { label: 'Video',  value: dxo.scores.video },
+    { label: 'Zoom',   value: dxo.scores.zoom },
+    { label: 'Bokeh',  value: dxo.scores.bokeh },
+    { label: 'Selfie', value: dxo.scores.selfie },
+    { label: 'Audio',  value: dxo.scores.audio },
+  ].filter(s => s.value !== null)
+
+  return (
+    <div className="mb-12">
+      <Card className="overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-3 bg-muted/50 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-semibold">DXOMark Camera Score</h2>
+          <div className="flex items-center gap-2">
+            {dxo.rankLabel && (
+              <Badge variant="secondary" className="text-xs">{dxo.rankLabel}</Badge>
+            )}
+            <a
+              href={dxo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="View on DXOMark"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          </div>
+        </div>
+
+        <CardContent className="p-5">
+          <div className="flex flex-wrap items-start gap-6">
+            {/* Overall score circle */}
+            {dxo.overallScore !== null && (
+              <div className="flex flex-col items-center gap-1.5 shrink-0">
+                <div className="w-20 h-20 rounded-full border-4 border-primary/70 flex items-center justify-center">
+                  <span className="text-2xl font-bold">{dxo.overallScore}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">Overall</span>
+              </div>
+            )}
+
+            {/* Sub-score chips */}
+            {subScores.length > 0 && (
+              <div className="flex flex-wrap gap-2 flex-1">
+                {subScores.map(({ label, value }) => (
+                  <div
+                    key={label}
+                    className="flex flex-col items-center rounded-lg border border-border bg-card px-3 py-2 min-w-[60px]"
+                  >
+                    <span className="text-base font-semibold">{value}</span>
+                    <span className="text-xs text-muted-foreground">{label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Strengths & weaknesses */}
+          {(dxo.strengths.length > 0 || dxo.weaknesses.length > 0) && (
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {dxo.strengths.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Strengths</p>
+                  <ul className="space-y-1">
+                    {dxo.strengths.slice(0, 4).map((s, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs">
+                        <span className="text-green-400 font-bold mt-px">+</span>
+                        <span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {dxo.weaknesses.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Weaknesses</p>
+                  <ul className="space-y-1">
+                    {dxo.weaknesses.slice(0, 4).map((w, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs">
+                        <span className="text-red-400 font-bold mt-px">−</span>
+                        <span>{w}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }

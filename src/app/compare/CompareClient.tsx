@@ -11,6 +11,7 @@ import PhoneSearch from './PhoneSearch'
 import { buildComparisonTable, type ComparisonCategory, type CellHighlight } from '@/lib/compareSpecs'
 import { formatSpecValue } from '@/lib/formatSpec'
 import type { IPhoneDetails } from '@/types'
+import type { IDxoScore } from '@/parser/parser.dxomark'
 
 const MAX_PHONES = 4
 
@@ -40,6 +41,9 @@ export default function CompareClient() {
   const requestedRef = useRef<Set<string>>(new Set())
   const [showDiffOnly, setShowDiffOnly] = useState(false)
 
+  const [dxoData, setDxoData] = useState<Record<string, IDxoScore | 'loading' | null>>({})
+  const dxoRequestedRef = useRef<Set<string>>(new Set())
+
   useEffect(() => {
     for (const slug of slugs) {
       if (requestedRef.current.has(slug)) continue
@@ -54,6 +58,25 @@ export default function CompareClient() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slugs.join(',')])
+
+  // Fetch DXOMark data for each fully-loaded phone
+  useEffect(() => {
+    for (const slug of slugs) {
+      const entry = phoneData[slug]
+      if (!entry || typeof entry !== 'object') continue
+      const phone = entry as IPhoneDetails
+      const key = slug
+      if (dxoRequestedRef.current.has(key)) continue
+      dxoRequestedRef.current.add(key)
+      setDxoData(prev => ({ ...prev, [key]: 'loading' }))
+      const name = encodeURIComponent(`${phone.brand} ${phone.model}`)
+      fetch(`/api/dxomark?name=${name}`)
+        .then(r => r.json())
+        .then(json => setDxoData(prev => ({ ...prev, [key]: json.status ? json.data : null })))
+        .catch(() => setDxoData(prev => ({ ...prev, [key]: null })))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneData])
 
   function updateSlugs(next: string[]) {
     if (next.length === 0) router.replace('/compare')
@@ -115,6 +138,11 @@ export default function CompareClient() {
           )}
         </div>
 
+        {/* DXOMark comparison panel */}
+        {slugs.some(s => dxoData[s] !== undefined) && (
+          <DxoComparePanel slugs={slugs} phones={loadedPhones} dxoData={dxoData} />
+        )}
+
         {/* Comparison table */}
         {table && (
           <>
@@ -166,6 +194,118 @@ export default function CompareClient() {
         )}
       </div>
     </main>
+  )
+}
+
+// ── DXOMark comparison panel ──────────────────────────────────────────────────
+
+const DXO_ROWS: { label: string; key: keyof IDxoScore['scores'] | 'overallScore' }[] = [
+  { label: 'Overall',  key: 'overallScore' },
+  { label: 'Photo',    key: 'photo' },
+  { label: 'Video',    key: 'video' },
+  { label: 'Zoom',     key: 'zoom' },
+  { label: 'Bokeh',    key: 'bokeh' },
+  { label: 'Selfie',   key: 'selfie' },
+]
+
+function getDxoValue(entry: IDxoScore | 'loading' | null | undefined, key: typeof DXO_ROWS[0]['key']): number | null | 'loading' {
+  if (entry === 'loading') return 'loading'
+  if (!entry) return null
+  if (key === 'overallScore') return entry.overallScore
+  return entry.scores[key as keyof IDxoScore['scores']]
+}
+
+function DxoComparePanel({
+  slugs, phones, dxoData,
+}: {
+  slugs: string[]
+  phones: IPhoneDetails[]
+  dxoData: Record<string, IDxoScore | 'loading' | null>
+}) {
+  // Only show rows where at least one phone has a non-null numeric value
+  const activeRows = DXO_ROWS.filter(row =>
+    slugs.some(s => {
+      const v = getDxoValue(dxoData[s], row.key)
+      return typeof v === 'number'
+    })
+  )
+  if (activeRows.length === 0) return null
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-lg font-semibold mb-4">DXOMark Scores</h2>
+      <div className="overflow-x-auto rounded-xl border border-border">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-border bg-card">
+              <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground sticky left-0 bg-card z-10 min-w-[100px] w-[100px] border-r border-border/30">
+                Score
+              </th>
+              {slugs.map(slug => {
+                const phone = phones.find(p => {
+                  const s = `${p.brand}_${p.model}`.toLowerCase().replace(/\s+/g, '_')
+                  return slug.startsWith(s.split('_')[0])
+                })
+                const entry = dxoData[slug]
+                const loaded = entry && entry !== 'loading' ? entry as IDxoScore : null
+                return (
+                  <th key={slug} className="px-4 py-3 text-left min-w-[150px]">
+                    {loaded ? (
+                      <>
+                        <p className="text-xs text-muted-foreground font-normal truncate">{loaded.device}</p>
+                      </>
+                    ) : phones.find(p => slug.includes(p.brand.toLowerCase().split(' ')[0])) ? (
+                      <>
+                        <p className="text-xs text-muted-foreground font-normal">{phones.find(p => slug.includes(p.brand.toLowerCase().split(' ')[0]))?.brand}</p>
+                        <p className="text-xs font-semibold leading-snug">{phones.find(p => slug.includes(p.brand.toLowerCase().split(' ')[0]))?.model}</p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{slug}</p>
+                    )}
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {activeRows.map(row => {
+              const values = slugs.map(s => getDxoValue(dxoData[s], row.key))
+              const nums = values.filter((v): v is number => typeof v === 'number')
+              const best = nums.length > 0 ? Math.max(...nums) : null
+              const worst = nums.length > 1 ? Math.min(...nums) : null
+
+              return (
+                <tr key={row.key} className="border-b border-border/40 last:border-0">
+                  <td className="px-4 py-2.5 text-xs text-muted-foreground font-medium sticky left-0 bg-background border-r border-border/30">
+                    {row.label}
+                  </td>
+                  {values.map((v, i) => {
+                    const isBest = typeof v === 'number' && v === best && nums.length > 1
+                    const isWorst = typeof v === 'number' && v === worst && nums.length > 1 && worst !== best
+                    const cls = isBest
+                      ? 'bg-green-950/60 text-green-300'
+                      : isWorst
+                        ? 'bg-red-950/60 text-red-300'
+                        : ''
+                    return (
+                      <td key={i} className={`px-4 py-2.5 text-xs font-medium ${cls}`}>
+                        {v === 'loading' ? (
+                          <Skeleton className="h-4 w-10" />
+                        ) : v === null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          v
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
