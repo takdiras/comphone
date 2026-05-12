@@ -140,11 +140,15 @@ export class ParserService {
       const hitsText = $(el).find('td').last().prev().text().replace(/,/g, '');
       if (href) {
         const slug = href.replace('.php', '');
+        // Stats page has no images — derive bigpic URL by stripping the numeric ID suffix
+        const imageSlug = slug.replace(/-\d+$/, '').replace(/_/g, '-').toLowerCase();
+        const imageUrl = `https://fdn2.gsmarena.com/vv/bigpic/${imageSlug}.jpg`;
         topPhones.push({
           rank: index + 1,
           name: link.text().trim(),
           slug,
           hits: parseInt(hitsText, 10) || 0,
+          imageUrl,
           detail_url: `/${slug}`,
         });
       }
@@ -183,11 +187,15 @@ export class ParserService {
   }
 
   async getLatestPhones(): Promise<IPhoneListItem[]> {
-    const ck = `gsm:latest:v1`;
+    const ck = `gsm:latest:v2`;
     const cached = await cacheGet<IPhoneListItem[]>(ck);
     if (cached) return cached;
 
-    const html = await getHtml(`${baseUrl}/new.php3`);
+    // Use results.php3 filtered by the last two years, sorted by newest
+    const currentYear = new Date().getFullYear();
+    const fromYear = currentYear - 1;
+    const url = `${baseUrl}/results.php3?sAvailabilities=1&YearMade=${fromYear}&YearMade=${currentYear}`;
+    const html = await getHtml(url);
     const $ = cheerio.load(html);
     const phones: IPhoneListItem[] = [];
 
