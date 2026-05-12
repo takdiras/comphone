@@ -159,7 +159,7 @@ export class ParserService {
   }
 
   async getPhonesByBrand(brandSlug: string): Promise<IPhoneListItem[]> {
-    const ck = `gsm:brand:v1:${brandSlug}`;
+    const ck = `gsm:brand:v2:${brandSlug}`;
     const cached = await cacheGet<IPhoneListItem[]>(ck);
     if (cached) return cached;
 
@@ -173,7 +173,7 @@ export class ParserService {
         const listSlug = href.replace('.php', '');
         const rawSrc = $(el).find('img').attr('src') || '';
         phones.push({
-          name: $(el).find('span').text().trim(),
+          name: $(el).find('span').html()?.split('<br>').join(' ').replace(/\s+/g, ' ').trim() || $(el).find('span').text().trim(),
           slug: listSlug,
           imageUrl: rawSrc ? toBigpicFromImgSrc(rawSrc, listSlug) : slugToBigpic(listSlug),
           thumbUrl: rawSrc || undefined,
@@ -187,7 +187,7 @@ export class ParserService {
   }
 
   async getLatestPhones(): Promise<IPhoneListItem[]> {
-    const ck = `gsm:latest:v2`;
+    const ck = `gsm:latest:v3`;
     const cached = await cacheGet<IPhoneListItem[]>(ck);
     if (cached) return cached;
 
@@ -205,7 +205,7 @@ export class ParserService {
         const listSlug = href.replace('.php', '');
         const rawSrc = $(el).find('img').attr('src') || '';
         phones.push({
-          name: $(el).find('span').text().trim(),
+          name: $(el).find('span').html()?.split('<br>').join(' ').replace(/\s+/g, ' ').trim() || $(el).find('span').text().trim(),
           slug: listSlug,
           imageUrl: rawSrc ? toBigpicFromImgSrc(rawSrc, listSlug) : slugToBigpic(listSlug),
           thumbUrl: rawSrc || undefined,
