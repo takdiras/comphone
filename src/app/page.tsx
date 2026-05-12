@@ -32,11 +32,7 @@ function PhoneCard({ phone }: { phone: SearchResult }) {
   const imgSrc = phone.thumbUrl || phone.imageUrl
 
   return (
-    <a
-      href={`https://www.gsmarena.com/${phone.slug}.php`}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
+    <a href={`/phone/${phone.slug}`}>
       <Card className="overflow-hidden transition-colors hover:border-primary/50 hover:bg-accent cursor-pointer h-full">
         <CardContent className="p-3 flex flex-col h-full">
           <div className="aspect-square relative mb-3 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
