@@ -1,13 +1,14 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Calendar, Ruler, Cpu, HardDrive, ExternalLink, GitCompareArrows, Camera } from 'lucide-react'
+import { ArrowLeft, Calendar, Ruler, Cpu, HardDrive, ExternalLink, GitCompareArrows } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { getPhoneDetails } from '@/parser/parser.phone-details'
 import { getDxoScores, type IDxoScore } from '@/parser/parser.dxomark'
 import { getReviewDetails } from '@/parser/parser.review'
-import { type IReviewResult, type ICameraSampleCategory } from '@/types'
+import { type IReviewResult } from '@/types'
 import ImageGallery from './ImageGallery'
+import CameraSamplesGallery from './CameraSamplesGallery'
 import { formatSpecValue } from '@/lib/formatSpec'
 
 export const dynamic = 'force-dynamic'
@@ -209,7 +210,7 @@ export default async function PhoneDetailPage({ params }: Props) {
 
         {/* Camera Samples */}
         {review && review.cameraSamples.length > 0 && (
-          <CameraSamplesSection samples={review.cameraSamples} reviewUrl={review.reviewUrl} />
+          <CameraSamplesGallery samples={review.cameraSamples} reviewUrl={review.reviewUrl} />
         )}
       </div>
     </main>
@@ -315,61 +316,3 @@ function DxoMarkSection({ dxo }: { dxo: IDxoScore }) {
   )
 }
 
-// ── Camera Samples section ────────────────────────────────────────────────────
-
-function CameraSamplesSection({
-  samples,
-  reviewUrl,
-}: {
-  samples: ICameraSampleCategory[]
-  reviewUrl: string
-}) {
-  return (
-    <div className="mt-12">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold flex items-center gap-2">
-          <Camera className="w-5 h-5" />
-          Camera Samples
-        </h2>
-        <a
-          href={reviewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-          Full Review
-        </a>
-      </div>
-
-      <div className="space-y-8">
-        {samples.map(cat => (
-          <div key={cat.label}>
-            <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-              {cat.label}
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {cat.images.slice(0, 12).map((img, i) => (
-                <a
-                  key={i}
-                  href={img.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block overflow-hidden rounded-lg bg-muted aspect-square hover:opacity-90 transition-opacity"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img.thumbnailUrl || img.url}
-                    alt={img.caption || `${cat.label} sample ${i + 1}`}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                </a>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
