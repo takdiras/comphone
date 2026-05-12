@@ -115,6 +115,9 @@ const HIGHER_BETTER: RegExp[] = [
   /\bspeaker\b/i,
   /\bdisplay.*size\b|\bscreen.*size\b/i,
   /\bperformance\b/i,
+  /\bbluetooth\b/i,
+  /\bwi-?fi\b/i,
+  /\busb\b/i,
 ]
 
 const LOWER_BETTER: RegExp[] = [
@@ -178,12 +181,21 @@ function extractBestBenchmarkScore(raw: string): number | null {
   return null
 }
 
+// ── Missing / absent value detection ─────────────────────────────────────────
+
+const MISSING_RE = /^(no|none|unspecified|n\/a|not\s+available|-)$/i
+
+function isMissing(normalized: string): boolean {
+  return normalized === '' || MISSING_RE.test(normalized.trim())
+}
+
 // ── Core comparison ───────────────────────────────────────────────────────────
 
 /**
  * Compare an array of raw spec values (one per phone) for the same spec label.
  *
  * Strategy:
+ *  0. Any "No" / "Unspecified" / empty → worst (unless ALL are missing → same)
  *  1. Exact text match after normalisation → all "same"
  *  2. Numeric values identical after normalisation → all "same" (catches "12 GB" vs "12GB")
  *  3. Numeric values differ + spec has a known direction → colour best/worst cells
@@ -195,6 +207,20 @@ export function compareSpecRow(rawValues: string[], specLabel: string): RowCompa
   // All empty
   if (norm.every(v => v === '')) {
     return { hasDiff: false, cells: rawValues.map(() => 'same') }
+  }
+
+  // Missing value detection ("No", "Unspecified", empty, etc.)
+  const missingFlags = norm.map(isMissing)
+  if (missingFlags.some(Boolean)) {
+    // All missing → no meaningful difference
+    if (missingFlags.every(Boolean)) {
+      return { hasDiff: false, cells: rawValues.map(() => 'same') }
+    }
+    // Mixed: phones with a real value win, phones with missing lose
+    return {
+      hasDiff: true,
+      cells: missingFlags.map(m => (m ? 'worst' : 'best')),
+    }
   }
 
   // Normalised text identical → same

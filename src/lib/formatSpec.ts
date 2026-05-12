@@ -190,6 +190,21 @@ function parseBenchmarkLine(line: string): Benchmark {
   return { name, entries }
 }
 
+/** Build a key → numeric-score map for cross-phone comparison */
+function parseBenchmarksMap(raw: string): Map<string, number> {
+  const map = new Map<string, number>()
+  const lines = stripHtml(raw).split('\n').map(l => l.trim()).filter(Boolean)
+  for (const line of lines) {
+    const bench = parseBenchmarkLine(line)
+    for (const e of bench.entries) {
+      const key = `${bench.name}|||${e.version || e.unit || '_'}`
+      const n = parseInt(e.score, 10)
+      if (!isNaN(n)) map.set(key, n)
+    }
+  }
+  return map
+}
+
 /**
  * Performance examples:
  *   "AnTuTu: 940921 (v9) | 1129280 (v10)"
