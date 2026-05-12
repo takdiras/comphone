@@ -1,6 +1,5 @@
 import { getBrands } from '@/parser/parser.brands'
 import { Card, CardContent } from '@/components/ui/card'
-import { Smartphone } from 'lucide-react'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
@@ -32,8 +31,7 @@ export default async function BrandsPage() {
             {entries.map(([name, info]) => (
               <Link key={info.brand_slug} href={`/brands/${info.brand_slug}`}>
                 <Card className="overflow-hidden h-full transition-colors hover:border-primary/50 hover:bg-accent cursor-pointer">
-                  <CardContent className="p-4 flex flex-col items-center justify-center gap-2 text-center min-h-[90px]">
-                    <Smartphone className="w-5 h-5 text-muted-foreground" />
+                  <CardContent className="p-4 flex flex-col items-center justify-center gap-1 text-center min-h-[80px]">
                     <p className="text-sm font-semibold leading-snug">{name}</p>
                     <p className="text-xs text-muted-foreground">{info.device_count} devices</p>
                   </CardContent>
