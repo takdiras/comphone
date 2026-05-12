@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Search, Smartphone, GitCompareArrows } from 'lucide-react'
+import { Search, Smartphone, GitCompareArrows, Clock, TrendingUp, Star } from 'lucide-react'
 
 interface SearchResult {
   name: string
@@ -74,6 +74,31 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Idle section state
+  type IdleTab = 'latest' | 'interest' | 'fans'
+  const [idleTab, setIdleTab] = useState<IdleTab>('latest')
+  const [idlePhones, setIdlePhones] = useState<SearchResult[]>([])
+  const [idleLoading, setIdleLoading] = useState(false)
+  const idleCache = useRef<Partial<Record<IdleTab, SearchResult[]>>>({})
+
+  useEffect(() => {
+    if (idleCache.current[idleTab]) {
+      setIdlePhones(idleCache.current[idleTab]!)
+      return
+    }
+    setIdleLoading(true)
+    const url = idleTab === 'latest' ? '/api/latest' : `/api/top?type=${idleTab === 'fans' ? 'fans' : 'interest'}`
+    fetch(url)
+      .then(r => r.json())
+      .then(json => {
+        const phones = (json.data || []) as SearchResult[]
+        idleCache.current[idleTab] = phones
+        setIdlePhones(phones)
+      })
+      .catch(() => setIdlePhones([]))
+      .finally(() => setIdleLoading(false))
+  }, [idleTab])
 
   useEffect(() => {
     if (!query.trim()) {
@@ -173,11 +198,42 @@ export default function SearchPage() {
           </p>
         )}
 
-        {/* Idle hint */}
+        {/* Idle: Latest / Trending tabs */}
         {!searched && !loading && (
-          <p className="text-center text-muted-foreground/50 text-xs mt-16">
-            Start typing to search over 10,000 devices
-          </p>
+          <div>
+            {/* Tab bar */}
+            <div className="flex items-center gap-1 mb-6 border-b border-border">
+              {([
+                { key: 'latest', label: 'Latest', Icon: Clock },
+                { key: 'interest', label: 'Trending', Icon: TrendingUp },
+                { key: 'fans', label: 'Fan Favourites', Icon: Star },
+              ] as const).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setIdleTab(key)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                    idleTab === key
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Grid */}
+            {idleLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {Array.from({ length: 10 }).map((_, i) => <PhoneCardSkeleton key={i} />)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {idlePhones.map(phone => <PhoneCard key={phone.slug} phone={phone} />)}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </main>

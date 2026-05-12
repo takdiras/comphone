@@ -3,7 +3,7 @@ import './globals.css'
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 import Link from 'next/link';
-import { GitCompareArrows } from 'lucide-react';
+import { GitCompareArrows, Building2 } from 'lucide-react';
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
@@ -19,13 +19,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <nav className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
           <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between">
             <Link href="/" className="font-bold text-base tracking-tight">Comphone</Link>
-            <Link
-              href="/compare"
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <GitCompareArrows className="w-4 h-4" />
-              Compare
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/brands"
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Building2 className="w-4 h-4" />
+                Brands
+              </Link>
+              <Link
+                href="/compare"
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <GitCompareArrows className="w-4 h-4" />
+                Compare
+              </Link>
+            </div>
           </div>
         </nav>
         {children}
