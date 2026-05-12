@@ -74,12 +74,12 @@ interface CoreCluster {
 
 /** Parse "1x2.7 GHz Cortex-A720" → { count:1, freq:"2.7", core:"Cortex-A720" } */
 function parseCluster(segment: string): CoreCluster | null {
-  // Matches: "1x2.7 GHz Cortex-A720"  or  "4x1.80GHz Cortex-A510"
+  // Matches: "1x2.7 GHz Cortex-A720", "4x1.80GHz Cortex-A510", or "1x3.1 GHz" (no core name)
   const m = segment.trim().match(
-    /^(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*GHz\s+(.+)$/i
+    /^(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*GHz(?:\s+(.+))?$/i
   )
   if (!m) return null
-  return { count: parseInt(m[1], 10), freq: m[2].replace(/0+$/, '').replace(/\.$/, ''), core: m[3].trim() }
+  return { count: parseInt(m[1], 10), freq: m[2].replace(/0+$/, '').replace(/\.$/, ''), core: (m[3] ?? '').trim() }
 }
 
 /**
@@ -106,7 +106,7 @@ function formatCpu(html: string): string {
       const clusterBlock = blockMatch ? blockMatch[2] : lineClean
 
       const clusters: CoreCluster[] = clusterBlock
-        .split(/\s*&\s*/)
+        .split(/\s*[&+]\s*/)
         .map(parseCluster)
         .filter((c): c is CoreCluster => c !== null)
 
@@ -144,7 +144,7 @@ function formatCpu(html: string): string {
               `<span class="text-muted-foreground/50 font-mono text-[10px] select-none">${connector}</span>` +
               `<span class="text-muted-foreground text-[10px]">${c.count}×</span>` +
               `<span class="font-bold text-foreground tabular-nums">${esc(c.freq)}&thinsp;GHz</span>` +
-              `<span class="text-muted-foreground text-[10px]">${esc(c.core)}</span>` +
+              (c.core ? `<span class="text-muted-foreground text-[10px]">${esc(c.core)}</span>` : '') +
             `</div>`
           )
         })
