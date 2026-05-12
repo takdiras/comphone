@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
+import Link from 'next/link';
+import { GitCompareArrows } from 'lucide-react';
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
@@ -13,7 +15,21 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn("dark font-sans", geist.variable)}>
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        <nav className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between">
+            <Link href="/" className="font-bold text-base tracking-tight">Comphone</Link>
+            <Link
+              href="/compare"
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <GitCompareArrows className="w-4 h-4" />
+              Compare
+            </Link>
+          </div>
+        </nav>
+        {children}
+      </body>
     </html>
   )
 }

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Search, Smartphone } from 'lucide-react'
+import { Search, Smartphone, GitCompareArrows } from 'lucide-react'
 
 interface SearchResult {
   name: string
@@ -32,28 +32,38 @@ function PhoneCard({ phone }: { phone: SearchResult }) {
   const imgSrc = phone.thumbUrl || phone.imageUrl
 
   return (
-    <a href={`/phone/${phone.slug}`}>
-      <Card className="overflow-hidden transition-colors hover:border-primary/50 hover:bg-accent cursor-pointer h-full">
-        <CardContent className="p-3 flex flex-col h-full">
-          <div className="aspect-square relative mb-3 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
-            {imgSrc && !imgError ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={imgSrc}
-                alt={phone.name}
-                className="w-full h-full object-contain p-2"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <Smartphone className="w-8 h-8 text-muted-foreground" />
-            )}
-          </div>
-          <p className="text-xs font-medium leading-snug line-clamp-3 flex-1">
-            {phone.name}
-          </p>
-        </CardContent>
-      </Card>
-    </a>
+    <div className="relative group">
+      <a href={`/phone/${phone.slug}`}>
+        <Card className="overflow-hidden transition-colors hover:border-primary/50 hover:bg-accent cursor-pointer h-full">
+          <CardContent className="p-3 flex flex-col h-full">
+            <div className="aspect-square relative mb-3 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
+              {imgSrc && !imgError ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imgSrc}
+                  alt={phone.name}
+                  className="w-full h-full object-contain p-2"
+                  onError={() => setImgError(true)}
+                />
+              ) : (
+                <Smartphone className="w-8 h-8 text-muted-foreground" />
+              )}
+            </div>
+            <p className="text-xs font-medium leading-snug line-clamp-3 flex-1">
+              {phone.name}
+            </p>
+          </CardContent>
+        </Card>
+      </a>
+      {/* Compare shortcut */}
+      <a
+        href={`/compare?phones=${phone.slug}`}
+        title="Compare this phone"
+        className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 rounded-md bg-muted/90 hover:bg-primary hover:text-primary-foreground flex items-center justify-center"
+      >
+        <GitCompareArrows className="w-3.5 h-3.5" />
+      </a>
+    </div>
   )
 }
 
@@ -99,11 +109,11 @@ export default function SearchPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto px-4 py-16">
+      <div className="max-w-5xl mx-auto px-4 py-10">
 
         {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Comphone</h1>
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold tracking-tight mb-1.5">Comphone</h1>
           <p className="text-muted-foreground text-sm">
             Search any smartphone — powered by GSMArena
           </p>

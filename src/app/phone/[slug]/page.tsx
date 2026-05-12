@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Calendar, Ruler, Cpu, HardDrive, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Calendar, Ruler, Cpu, HardDrive, ExternalLink, GitCompareArrows } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { getPhoneDetails } from '@/parser/parser.phone-details'
@@ -101,6 +101,12 @@ export default async function PhoneDetailPage({ params }: Props) {
 
             {/* Action links */}
             <div className="flex flex-wrap gap-2">
+              <Link href={`/compare?phones=${slug}`}>
+                <Badge variant="secondary" className="gap-1 cursor-pointer hover:bg-accent">
+                  <GitCompareArrows className="w-3 h-3" />
+                  Compare
+                </Badge>
+              </Link>
               <a
                 href={`https://www.gsmarena.com/${slug}.php`}
                 target="_blank"
