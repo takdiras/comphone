@@ -216,11 +216,20 @@ export function compareSpecRow(rawValues: string[], specLabel: string): RowCompa
     if (missingFlags.every(Boolean)) {
       return { hasDiff: false, cells: rawValues.map(() => 'same') }
     }
-    // Mixed: phones with a real value win, phones with missing lose
-    return {
-      hasDiff: true,
-      cells: missingFlags.map(m => (m ? 'worst' : 'best')),
-    }
+
+    // Some missing — compare non-missing phones among themselves first,
+    // then slot missing ones in as 'worst'
+    const nonMissingRaw = rawValues.filter((_, i) => !missingFlags[i])
+    const subResult =
+      nonMissingRaw.length === 1
+        ? ({ hasDiff: false, cells: ['same' as CellHighlight] })
+        : compareSpecRow(nonMissingRaw, specLabel) // recursive, won't re-hit missing branch
+
+    let subIdx = 0
+    const cells: CellHighlight[] = missingFlags.map(missing =>
+      missing ? 'worst' : subResult.cells[subIdx++]
+    )
+    return { hasDiff: true, cells }
   }
 
   // Normalised text identical → same
