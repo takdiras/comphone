@@ -1,5 +1,6 @@
 import { IPhoneDetails, IDeviceImage, IColorVariant, IPicturesPageData } from "../types";
 import * as cheerio from 'cheerio';
+import type { Element, AnyNode } from 'domhandler';
 import { baseUrl } from "../config";
 import { TSpecCategory } from "../types";
 import { getHtml } from "./parser.service";
@@ -87,7 +88,7 @@ const GENERIC_TOKENS = new Set<string>([
  */
 function extractImgUrl(
   $: cheerio.CheerioAPI,
-  el: cheerio.Element | cheerio.AnyNode,
+  el: Element | AnyNode,
 ): string {
   const $el = $(el);
   return (
@@ -441,7 +442,7 @@ async function scrapePicturesPage(url: string): Promise<PicturesPageResult> {
     // Use unified helper first; fall back to child <img>
     const raw =
       extractImgUrl($pic, el) ||
-      extractImgUrl($pic, $li.find('img').get(0) as cheerio.Element);
+      extractImgUrl($pic, $li.find('img').get(0) as Element);
     const imgUrl = ensureHttps(raw);
 
     const colorName = (
@@ -563,7 +564,7 @@ export async function getPhoneDetails(slug: string): Promise<IPhoneDetails> {
   $('.specs-photo-colors li, .color-list li').each((_, el) => {
     const img = $(el).find('img');
     // Use unified helper on the img element
-    const url = ensureHttps(extractImgUrl($, img.get(0) as cheerio.Element));
+    const url = ensureHttps(extractImgUrl($, img.get(0) as Element));
     const color =
       $(el).attr('title') ||
       img.attr('alt') ||

@@ -13,6 +13,7 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import type { Element } from 'domhandler';
 import { cacheGet, cacheSet } from '../cache';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -644,7 +645,7 @@ function extractProsConsFromHtml($: cheerio.CheerioAPI): { strengths: string[]; 
   let currentSection: 'pros' | 'cons' | '' = '';
 
   $('h4, li').each((_, el) => {
-    const tag = (el as cheerio.Element).name;
+    const tag = (el as Element).name;
     const txt = $(el).text().trim();
     if (tag === 'h4') {
       if (HTML_REGEXES.prosHeader.test(txt)) currentSection = 'pros';
@@ -920,13 +921,13 @@ function cleanCaption(raw: string): string {
  */
 function extractReviewSampleImages(
   $: cheerio.CheerioAPI,
-  bodyEl: cheerio.Cheerio<cheerio.Element>,
+  bodyEl: cheerio.Cheerio<Element>,
 ): IDxoSampleImage[] {
   const sampleImages: IDxoSampleImage[] = [];
   let currentCategory = 'Sample Shots';
 
   bodyEl.find('*').each((_, el) => {
-    const tag = (el as cheerio.Element).name;
+    const tag = (el as Element).name;
 
     // Update category from headings
     if (REVIEW_IMAGE_REGEXES.categoryHeading.test(tag)) {
@@ -993,7 +994,7 @@ function extractReviewProsCons($: cheerio.CheerioAPI): { pros: string[]; cons: s
   let prosCons: 'pros' | 'cons' | '' = '';
 
   $('h6, h5, h4, h3, li').each((_, el) => {
-    const tag = (el as cheerio.Element).name;
+    const tag = (el as Element).name;
     const raw = $(el).text();
     const txt = raw.trim();
 
@@ -1114,13 +1115,13 @@ export async function scrapeDxoReview(reviewUrl: string, nocache = false): Promi
   $('h6, h5, h4, h3, li, p').each((_, el) => {
     const txt = $(el).text().trim();
     if (/key camera spec/i.test(txt)) { inSpecs = true; return; }
-    if (inSpecs && (el as cheerio.Element).name === 'li' && txt.length > 3) cameraSpecs.push(txt);
+    if (inSpecs && (el as Element).name === 'li' && txt.length > 3) cameraSpecs.push(txt);
     if (inSpecs && /^(scoring|overview|test summary|pros|cons)/i.test(txt)) inSpecs = false;
   });
 
   const { scores, bestScores } = extractReviewScores($);
   const { pros, cons } = extractReviewProsCons($);
-  const bodyEl = $('body') as cheerio.Cheerio<cheerio.Element>;
+  const bodyEl = $('body') as cheerio.Cheerio<Element>;
   const sampleImages = extractReviewSampleImages($, bodyEl);
 
   const result: IDxoReview = {
