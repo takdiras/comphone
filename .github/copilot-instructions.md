@@ -1,4 +1,4 @@
-# Copilot Instructions
+# Comphone — Copilot Instructions
 
 ## Build & Dev Commands
 

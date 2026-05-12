@@ -107,7 +107,7 @@ export default function SearchPage() {
 
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Mobile Specs</h1>
+          <h1 className="text-4xl font-bold tracking-tight mb-2">Comphone</h1>
           <p className="text-muted-foreground text-sm">
             Search any smartphone — powered by GSMArena
           </p>
