@@ -155,19 +155,113 @@ function formatCpu(html: string): string {
     .join('<div class="mt-2 border-t border-border/30 pt-2"></div>')
 }
 
+// ── Performance formatter ─────────────────────────────────────────────────────
+
+interface BenchEntry {
+  score: string    // raw number string e.g. "940921"
+  unit: string     // e.g. "fps" or ""
+  version: string  // e.g. "v9" or "ES 3.1 onscreen" or ""
+}
+
+interface Benchmark {
+  name: string
+  entries: BenchEntry[]
+}
+
+function parseBenchmarkLine(line: string): Benchmark {
+  const colonIdx = line.indexOf(':')
+  if (colonIdx === -1) return { name: line, entries: [] }
+
+  const name = line.slice(0, colonIdx).trim()
+  const rest = line.slice(colonIdx + 1).trim()
+
+  const entries: BenchEntry[] = rest.split('|').map(part => {
+    part = part.trim()
+    // Matches: "940921 (v9)"  or  "79fps (ES 3.1 onscreen)"  or  "3550 (v5.1)"
+    const m = part.match(/^([\d,]+(?:\.\d+)?)\s*(fps)?\s*(?:\(([^)]+)\))?/)
+    if (!m) return { score: part, unit: '', version: '' }
+    return {
+      score: m[1].replace(/,/g, ''),
+      unit: m[2] ?? '',
+      version: m[3]?.trim() ?? '',
+    }
+  })
+
+  return { name, entries }
+}
+
+/**
+ * Performance examples:
+ *   "AnTuTu: 940921 (v9) | 1129280 (v10)"
+ *   "GeekBench: 3550 (v5.1) | 3946 (v6)"
+ *   "GFXBench: 79fps (ES 3.1 onscreen)"
+ */
+function formatPerformance(html: string): string {
+  const lines = stripHtml(html)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+
+  if (lines.length === 0) return ''
+
+  const benchmarks = lines.map(parseBenchmarkLine)
+
+  return (
+    `<div class="flex flex-col gap-2.5">` +
+    benchmarks
+      .map(bench => {
+        if (bench.entries.length === 0) {
+          return `<div class="text-xs">${esc(bench.name)}</div>`
+        }
+
+        const entriesHtml = bench.entries
+          .map(e => {
+            const scoreNum = parseInt(e.score, 10)
+            const scoreFmt = isNaN(scoreNum)
+              ? esc(e.score)
+              : scoreNum.toLocaleString()
+            const unitHtml = e.unit
+              ? `<span class="text-[10px] text-muted-foreground ml-0.5">${esc(e.unit)}</span>`
+              : ''
+            const verHtml = e.version
+              ? `<span class="text-[10px] font-mono px-1 rounded bg-muted/70 text-muted-foreground">${esc(e.version)}</span>`
+              : ''
+            return (
+              `<div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-background border border-border/40 shadow-sm">` +
+                verHtml +
+                `<span class="font-bold tabular-nums text-sm tracking-tight">${scoreFmt}</span>` +
+                unitHtml +
+              `</div>`
+            )
+          })
+          .join('')
+
+        return (
+          `<div class="flex flex-col gap-1">` +
+            `<div class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">${esc(bench.name)}</div>` +
+            `<div class="flex flex-wrap gap-1.5">${entriesHtml}</div>` +
+          `</div>`
+        )
+      })
+      .join('') +
+    `</div>`
+  )
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
-const FORMATTED_LABELS = new Set(['chipset', 'cpu'])
+const FORMATTED_LABELS = new Set(['chipset', 'cpu', 'performance'])
 
 /**
  * Returns formatted HTML for a spec cell.
- * For Chipset and CPU rows, applies richer typography.
+ * For Chipset, CPU, and Performance rows, applies richer typography.
  * All other rows: just converts `\n` to `<br/>`.
  */
 export function formatSpecValue(label: string, rawHtml: string): string {
   const l = label.toLowerCase()
   if (l === 'chipset') return formatChipset(rawHtml)
   if (l === 'cpu') return formatCpu(rawHtml)
+  if (l === 'performance') return formatPerformance(rawHtml)
   return rawHtml.replace(/\n/g, '<br/>')
 }
 

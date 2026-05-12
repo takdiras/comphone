@@ -114,6 +114,7 @@ const HIGHER_BETTER: RegExp[] = [
   /\bbrightness\b/i,
   /\bspeaker\b/i,
   /\bdisplay.*size\b|\bscreen.*size\b/i,
+  /\bperformance\b/i,
 ]
 
 const LOWER_BETTER: RegExp[] = [
@@ -125,6 +126,56 @@ function direction(label: string): 'higher' | 'lower' | 'none' {
   if (HIGHER_BETTER.some(r => r.test(label))) return 'higher'
   if (LOWER_BETTER.some(r => r.test(label))) return 'lower'
   return 'none'
+}
+
+// ── Performance benchmark extractor ──────────────────────────────────────────
+
+/**
+ * Extract the best representative benchmark score from a raw performance value.
+ * Priority: AnTuTu (latest version) > GeekBench > GFXBench fps > any large number.
+ * Scores from different benchmark apps are scaled to be roughly comparable.
+ */
+function extractBestBenchmarkScore(raw: string): number | null {
+  const text = raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/gi, '&')
+    .toLowerCase()
+
+  // AnTuTu — try v10 first, then v9, then any version
+  const antutuLine = text.match(/antutu[^\n]*/)?.[0] ?? ''
+  if (antutuLine) {
+    const v10 = antutuLine.match(/\|\s*([\d,]+)\s*\(v10\)/)
+    if (v10) return parseInt(v10[1].replace(/,/g, ''), 10)
+    const v9 = antutuLine.match(/([\d,]{5,})\s*\(v9\)/)
+    if (v9) return parseInt(v9[1].replace(/,/g, ''), 10)
+    const any = antutuLine.match(/([\d,]{5,})/)
+    if (any) return parseInt(any[1].replace(/,/g, ''), 10)
+  }
+
+  // GeekBench — try v6 first, then v5, then any
+  const geekLine = text.match(/geekbench[^\n]*/)?.[0] ?? ''
+  if (geekLine) {
+    const v6 = geekLine.match(/\|\s*([\d,]+)\s*\(v6\)/)
+    if (v6) return parseInt(v6[1].replace(/,/g, ''), 10) * 150 // scale up to AnTuTu range
+    const v5 = geekLine.match(/([\d,]+)\s*\(v5/)
+    if (v5) return parseInt(v5[1].replace(/,/g, ''), 10) * 150
+    const any = geekLine.match(/([\d,]+)/)
+    if (any) return parseInt(any[1].replace(/,/g, ''), 10) * 150
+  }
+
+  // GFXBench fps — scale up
+  const gfxLine = text.match(/gfxbench[^\n]*/)?.[0] ?? ''
+  if (gfxLine) {
+    const fps = gfxLine.match(/([\d,]+)\s*fps/)
+    if (fps) return parseInt(fps[1].replace(/,/g, ''), 10) * 10_000
+  }
+
+  // Fallback: largest multi-digit number
+  const nums = text.match(/\d{4,}/g) ?? []
+  if (nums.length) return Math.max(...nums.map(n => parseInt(n, 10)))
+
+  return null
 }
 
 // ── Core comparison ───────────────────────────────────────────────────────────
@@ -149,6 +200,25 @@ export function compareSpecRow(rawValues: string[], specLabel: string): RowCompa
   // Normalised text identical → same
   if (norm.every(v => v === norm[0])) {
     return { hasDiff: false, cells: rawValues.map(() => 'same') }
+  }
+
+  // Special path for performance benchmarks — compare best representative score
+  if (/\bperformance\b/i.test(specLabel)) {
+    const scores = rawValues.map(extractBestBenchmarkScore)
+    if (scores.every(s => s !== null)) {
+      const vals = scores as number[]
+      if (new Set(vals).size === 1) {
+        return { hasDiff: false, cells: rawValues.map(() => 'same') }
+      }
+      const max = Math.max(...vals)
+      const min = Math.min(...vals)
+      const cells: CellHighlight[] = vals.map(n => {
+        if (n === max) return 'best'
+        if (n === min) return 'worst'
+        return 'diff'
+      })
+      return { hasDiff: true, cells }
+    }
   }
 
   // Attempt numeric extraction
