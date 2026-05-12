@@ -154,7 +154,7 @@ export default async function PhoneDetailPage({ params }: Props) {
               {specCategories.map(([category, specs]) => (
                 <Card key={category} className="overflow-hidden">
                   <div className="px-4 py-3 bg-muted/50 border-b border-border">
-                    <h3 className="text-sm font-semibold">{category}</h3>
+                    <h3 className="text-sm font-semibold">{category === 'Tests' ? 'GSMArena Tests' : category}</h3>
                   </div>
                   <CardContent className="p-0">
                     <table className="w-full text-sm">

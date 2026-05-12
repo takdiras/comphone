@@ -326,7 +326,7 @@ function CategorySection({
           colSpan={colSpan}
           className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground border-t border-b border-border"
         >
-          {category}
+          {category === 'Tests' ? 'GSMArena Tests' : category}
         </td>
       </tr>
       {rows.map(({ label, values, comparison }) => (
