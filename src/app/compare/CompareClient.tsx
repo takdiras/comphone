@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import PhoneSearch from './PhoneSearch'
 import { buildComparisonTable, type ComparisonCategory, type CellHighlight } from '@/lib/compareSpecs'
+import { formatSpecValue } from '@/lib/formatSpec'
 import type { IPhoneDetails } from '@/types'
 
 const MAX_PHONES = 4
@@ -340,7 +341,7 @@ function CategorySection({
             <td
               key={i}
               className={`px-4 py-2.5 text-xs leading-relaxed align-top transition-colors [&_a]:text-primary [&_a]:underline ${cellClass(comparison.cells[i])}`}
-              dangerouslySetInnerHTML={{ __html: val.replace(/\n/g, '<br/>') }}
+              dangerouslySetInnerHTML={{ __html: formatSpecValue(label, val) }}
             />
           ))}
         </tr>

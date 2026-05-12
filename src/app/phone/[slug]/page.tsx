@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { getPhoneDetails } from '@/parser/parser.phone-details'
 import ImageGallery from './ImageGallery'
+import { formatSpecValue } from '@/lib/formatSpec'
 
 export const dynamic = 'force-dynamic'
 
@@ -166,7 +167,7 @@ export default async function PhoneDetailPage({ params }: Props) {
                             <td
                               className="px-4 py-2.5 text-xs leading-relaxed align-top [&_a]:text-primary [&_a]:underline"
                               dangerouslySetInnerHTML={{
-                                __html: value.replace(/\n/g, '<br/>'),
+                                __html: formatSpecValue(label, value),
                               }}
                             />
                           </tr>
