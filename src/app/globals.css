@@ -57,3 +57,23 @@
     @apply font-sans;
   }
 }
+
+@keyframes widen-spacing {
+  to {
+    letter-spacing: 0.25em;
+  }
+}
+
+@keyframes narrow-spacing {
+  to {
+    letter-spacing: 0;
+  }
+}
+
+.animate-widen-spacing {
+  transition: letter-spacing 0.6s ease-out;
+}
+
+.animate-widen-spacing:hover {
+  letter-spacing: 0.25em;
+}

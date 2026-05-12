@@ -22,9 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={cn("dark font-sans", prompt.variable)}>
       <body className="min-h-screen antialiased">
         <nav className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
-          <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between py-6">
             <Link href="/" className="text-base tracking-tight">
-              <span className="font-black italic text-foreground">Comphone</span>
+              <span className="font-black italic text-foreground text-4xl hover:font-black animate-widen-spacing">COMPHONE</span>
             </Link>
             <div className="flex items-center gap-4">
               <Link
